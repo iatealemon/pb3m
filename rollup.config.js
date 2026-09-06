@@ -75,6 +75,7 @@ export default [
                     output: {
                         file: LICENSES_PATH,
                     },
+                    includeSelf: true,
                 },
             }),
             /*license({

@@ -117,10 +117,14 @@ function MonacoController(api) {
             eddy.onDidBlurEditorWidget(() => this.blur()); // blur iframe when editor is unfocused so that key events go into the parent document
             eddy.onDidChangeModelContent(() => this.squigglifier.scheduleUpdate(eddy));
             eddy.onDidFocusEditorWidget(() => this.contextTypeHandler.update());
+            // change keybind of "Rename Symbol" because it clashes with "Go fullscreen" shortcut added by pb3
+            const disposables = changeKeybind(eddy, "editor.action.rename", this.monaco.KeyMod.Alt | this.monaco.KeyCode.F2);
+            (eddy._pb3mDisposables ??= []).push(...disposables);
             return eddy;
         },
         destroyEditor(editor) {
             api.destroyEditor(editor);
+            editor._pb3mDisposables.forEach(d => d.dispose());
             const resetTargetElement = this.targetElement === this.targetElementsPerEditor.get(editor);
             this.targetElementsPerEditor.delete(editor);
             if (resetTargetElement) {
@@ -176,7 +180,10 @@ function MonacoController(api) {
     controller.contextTypeHandler = new ContextTypeHandler(controller);
     controller.overlayer = new Overlayer(controller);
 
-    controller.updateCompilerOptions({ allowNonTsExtensions: true }); // prevents error maybe related the default file uri "inmemory://model/1" getting rejected
+    controller.updateCompilerOptions({
+        allowNonTsExtensions: true, // prevents error maybe related the default file uri "inmemory://model/1" getting rejected
+        strictNullChecks: true, // prevents unions containing null from being displayed without null
+    });
     fetchDist("pb3-script-env.d.ts").then(resp => resp.text()).then(src => {
         const defaults = controller.monaco.languages.typescript.javascriptDefaults;
         //controller.updateCompilerOptions({ noLib: true });
@@ -201,4 +208,23 @@ async function fetchDist(item) {
         log.error(`Failed to fetch ${item} from dist:`, e);
         throw e;
     }
+}
+
+function changeKeybind(editor, commandId, newKeybind) {
+    // remove existing keybind
+    const disposable1 = editor._standaloneKeybindingService.addDynamicKeybinding(
+        "-" + commandId, // - in front means remove existing keybind
+        0, // 0 apparently means no key in this version of monaco (examples online use undefined or null)
+        () => {}
+    );
+
+    // register new keybind
+    const disposable2 = editor._standaloneKeybindingService.addDynamicKeybinding(
+        commandId,
+        newKeybind,
+        () => editor.getAction(commandId).run(),
+        editor.getAction(commandId)._precondition // use same conditions
+    );
+
+    return [disposable1, disposable2];
 }

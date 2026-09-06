@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name PB3M
 // @description Userscript to improve the PB3 script editor.
-// @version 1.0.0
+// @version 1.1.0
 // @author jeje52
 // @match https://www.plazmaburst.net/**
 // @connect github.com
@@ -12,6 +12,39 @@
 
 /*!
  * Licenses:
+ * 
+ * Name: pb3m
+ * Version: 1.1.0
+ * License: MIT
+ * Private: false
+ * Description: Userscript to improve the PB3 script editor.
+ * Author: jeje52
+ * License Text:
+ * ===
+ * 
+ * MIT License
+ * 
+ * Copyright (c) 2026 jeje52
+ * 
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ * 
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software.
+ * 
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ * 
+ * ---
  * 
  * Name: ahocorasick
  * Version: 1.0.2
@@ -46,10 +79,14 @@
  * SOFTWARE.
  */
 
-const exposed = unsafeWindow.pb3m = {};
+const exposed = unsafeWindow.pb3m ??= {};
 
 function exposeToConsole(name, item) {
     exposed[name] = item;
+}
+
+function getExposedItem(name) {
+    return exposed[name];
 }
 
 const NAME = "PB3M";
@@ -110,19 +147,30 @@ const isPlainObject = (obj) => obj !== null && typeof obj === "object" && Object
 
 /** proxies object to ignore access and function calls on nonexistent properties */
 function permissive(obj, chain="") {
-    // check prevents error from trying to overwrite function's "call" property. special handling for AceEditorAdapter.session.$worker
-    if (!obj.hasOwnProperty("call"))
-        obj = Object.assign(() => permissive({}), obj);
-
-    return new Proxy(obj, {
+    const callableTarget = () => {};
+    return new Proxy(callableTarget, {
         get(target, prop, receiver) {
-            if (prop in target)
-                return Reflect.get(...arguments);
+            if (prop in obj)
+                return Reflect.get(obj, prop, receiver);
             const newChain = chain + "." + String(prop);
             log$4.warn("Unknown property access:", newChain);
             return permissive({}, newChain);
         },
+        set(target, prop, value) {
+            return Reflect.set(obj, prop, value);
+        },
+        has(target, prop) {
+            return prop in obj;
+        },
+        ownKeys(target) {
+            return Reflect.ownKeys(obj);
+        },
+        getOwnPropertyDescriptor(target, prop) {
+            return Reflect.getOwnPropertyDescriptor(obj, prop);
+        },
         apply(target, thisArg, args) {
+            if (typeof obj === "function")
+                return Reflect.apply(obj, thisArg, args);
             const newChain = chain + "()";
             log$4.warn("Unknown function call:", newChain);
             return permissive({}, newChain);
@@ -165,7 +213,9 @@ function AceAdapter(monacoController) {
                 element.textContent = "";
             }
 
-            return new AceEditorAdapter(element, options, monacoController, sourceCode);
+            const editorAdapter = new AceEditorAdapter(element, options, monacoController, sourceCode);
+            exposeToConsole("editorAdapter", editorAdapter);
+            return editorAdapter;
         },
         UndoManager: nop,
     };
@@ -221,21 +271,25 @@ function AceEditorAdapter(targetElement, options, monacoController, sourceCode="
             setTabSize: (v) => eddy.updateOptions({ tabSize: v }),
             setUseSoftTabs: (v) => eddy.updateOptions({ insertSpaces: v }),
             $worker: {
-                call(fnkey, args) {
+                call: nop,/*(fnkey, args) => {
                     if (fnkey !== "setOptions")
-                        log$4.warn(`AceEditorAdapter.session.$worker.call called with unsupported fnkey: ${fnkey}`);
+                        log.warn(`AceEditorAdapter.session.$worker.call called with unsupported fnkey: ${fnkey}`);
                     else if (args.length !== 1)
-                        log$4.warn(`AceEditorAdapter.session.$worker.call fnkey="setOptions" called with unsupported args length: ${args.length}`);
+                        log.warn(`AceEditorAdapter.session.$worker.call fnkey="setOptions" called with unsupported args length: ${args.length}`);
                     else if (Object.keys(args[0]).length !== 2)
-                        log$4.warn(`AceEditorAdapter.session.$worker.call fnkey="setOptions" called with unsupported options length: ${args[0].length}`);
+                        log.warn(`AceEditorAdapter.session.$worker.call fnkey="setOptions" called with unsupported options length: ${args[0].length}`);
                     else if (Object.keys(args[0]).some(k => !["loopfunc", "esversion"].includes(k)))
-                        log$4.warn(`AceEditorAdapter.session.$worker.call fnkey="setOptions" called with unsupported option keys: ${args[0]}`);
+                        log.warn(`AceEditorAdapter.session.$worker.call fnkey="setOptions" called with unsupported option keys: ${args[0]}`);
                     else {
                         // args = [{ loopfunc:true, esversion:6 }]
                         // ignore loopfunc, no equivalent (jshint setting)
-                        return
+                        const esversion = args[0].esversion;
+                        const target = esversion > 5 ? "ES" + (2009 + esversion).toString() : "ES" + esversion.toString();
+                        const targetEnum = monica.languages.typescript.ScriptTarget;
+                        if (target in targetEnum)
+                            monacoController.updateCompilerOptions({ target: targetEnum[target]});
                     }
-                },
+                },*/
             },
             setUndoManager: nop,
             getUndoManager: () => ({
@@ -250,7 +304,7 @@ function AceEditorAdapter(targetElement, options, monacoController, sourceCode="
         renderer: {
             get scrollTop() { return eddy.getScrollTop(); },
             set scrollTop(v) { return eddy.setScrollTop(v); },
-            scrollBy: (dy) => eddy.setScrollTop(eddy.getScrollTop + dy),
+            scrollBy: (dy) => eddy.setScrollTop(eddy.getScrollTop() + dy),
             animateScrolling: nop,
             updateFull: nop,
         },
@@ -313,8 +367,7 @@ function AceEditorAdapter(targetElement, options, monacoController, sourceCode="
         commands: {
             addCommand: function({name, bindKey, exec}) {
                 const id = name.toLowerCase().replaceAll(" ", "-");
-                const key = {
-                    "F2": monica.KeyCode.F2,
+                const key = monica.KeyCode[bindKey.win] ?? {
                     "Esc": monica.KeyCode.Escape,
                 }[bindKey.win];
                 if (key === undefined) {
@@ -325,7 +378,8 @@ function AceEditorAdapter(targetElement, options, monacoController, sourceCode="
                     id,
                     label: name,
                     keybindings: [monica.KeyMod.None | key],
-                    run: () => exec(adapter),
+                    contextMenuGroupId: "pb3m",
+                    run: () => exec(proxied),
                 });
             },
         },
@@ -333,8 +387,10 @@ function AceEditorAdapter(targetElement, options, monacoController, sourceCode="
         get $isFocused() {
             return eddy.hasTextFocus();
         },
+        myFullScreenMode: false,
     };
-    return deepPermissive(adapter);
+    const proxied = deepPermissive(adapter);
+    return proxied;
 }
 
 var iframeScript = `// highest available cdn release is 0.53.0, using 0.52.0 because monaco.contribution.js can randomly fail and throw on 0.53.0
@@ -1096,8 +1152,13 @@ class Overlayer {
 
         // update z-index (changes when entering fullscreen)
         let targetZ = parseInt(style.zIndex);
-        if (Number.isNaN(targetZ)) targetZ = 1;
-        container.style.zIndex = targetZ + 1;
+        if (Number.isNaN(targetZ)) {
+            container.style.zIndex = "auto";
+            if (targetElement.id !== "texteditor") // file contents script editor
+                container.style.zIndex = 2;
+        }
+        else
+            container.style.zIndex = targetZ + 1;
 
         // update visibility (changes when pressing esc)
         container.style.visibility = style.visibility;
@@ -1235,10 +1296,14 @@ function MonacoController(api) {
             eddy.onDidBlurEditorWidget(() => this.blur()); // blur iframe when editor is unfocused so that key events go into the parent document
             eddy.onDidChangeModelContent(() => this.squigglifier.scheduleUpdate(eddy));
             eddy.onDidFocusEditorWidget(() => this.contextTypeHandler.update());
+            // change keybind of "Rename Symbol" because it clashes with "Go fullscreen" shortcut added by pb3
+            const disposables = changeKeybind(eddy, "editor.action.rename", this.monaco.KeyMod.Alt | this.monaco.KeyCode.F2);
+            (eddy._pb3mDisposables ??= []).push(...disposables);
             return eddy;
         },
         destroyEditor(editor) {
             api.destroyEditor(editor);
+            editor._pb3mDisposables.forEach(d => d.dispose());
             const resetTargetElement = this.targetElement === this.targetElementsPerEditor.get(editor);
             this.targetElementsPerEditor.delete(editor);
             if (resetTargetElement) {
@@ -1294,7 +1359,10 @@ function MonacoController(api) {
     controller.contextTypeHandler = new ContextTypeHandler(controller);
     controller.overlayer = new Overlayer(controller);
 
-    controller.updateCompilerOptions({ allowNonTsExtensions: true }); // prevents error maybe related the default file uri "inmemory://model/1" getting rejected
+    controller.updateCompilerOptions({
+        allowNonTsExtensions: true, // prevents error maybe related the default file uri "inmemory://model/1" getting rejected
+        strictNullChecks: true, // prevents unions containing null from being displayed without null
+    });
     fetchDist("pb3-script-env.d.ts").then(resp => resp.text()).then(src => {
         const defaults = controller.monaco.languages.typescript.javascriptDefaults;
         //controller.updateCompilerOptions({ noLib: true });
@@ -1319,6 +1387,25 @@ async function fetchDist(item) {
         log$1.error(`Failed to fetch ${item} from dist:`, e);
         throw e;
     }
+}
+
+function changeKeybind(editor, commandId, newKeybind) {
+    // remove existing keybind
+    const disposable1 = editor._standaloneKeybindingService.addDynamicKeybinding(
+        "-" + commandId, // - in front means remove existing keybind
+        0, // 0 apparently means no key in this version of monaco (examples online use undefined or null)
+        () => {}
+    );
+
+    // register new keybind
+    const disposable2 = editor._standaloneKeybindingService.addDynamicKeybinding(
+        commandId,
+        newKeybind,
+        () => editor.getAction(commandId).run(),
+        editor.getAction(commandId)._precondition // use same conditions
+    );
+
+    return [disposable1, disposable2];
 }
 
 const log = log$5.at("patch");
@@ -1420,6 +1507,11 @@ function patchFetchUntilAcePrevented(monacoPromise) {
 }
 
 function start() {
+    if (getExposedItem("running")) {
+        log$5.error("Some version of PB3M is already active. Check that only the version of the userscript you intend to run is active.");
+        return;
+    }
+    exposeToConsole("running", true);
     log$5.info("Active");
     patchScriptEditor();
 }

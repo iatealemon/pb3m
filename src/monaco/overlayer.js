@@ -46,8 +46,13 @@ export class Overlayer {
 
         // update z-index (changes when entering fullscreen)
         let targetZ = parseInt(style.zIndex);
-        if (Number.isNaN(targetZ)) targetZ = 1;
-        container.style.zIndex = targetZ + 1;
+        if (Number.isNaN(targetZ)) {
+            container.style.zIndex = "auto";
+            if (targetElement.id !== "texteditor") // file contents script editor
+                container.style.zIndex = 2;
+        }
+        else
+            container.style.zIndex = targetZ + 1;
 
         // update visibility (changes when pressing esc)
         container.style.visibility = style.visibility;

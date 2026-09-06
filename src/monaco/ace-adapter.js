@@ -1,3 +1,4 @@
+import { exposeToConsole } from "../console-expose.js";
 import { log as baseLog } from "../log.js";
 
 const log = baseLog.at("ace-adapter");
@@ -7,19 +8,30 @@ const isPlainObject = (obj) => obj !== null && typeof obj === "object" && Object
 
 /** proxies object to ignore access and function calls on nonexistent properties */
 function permissive(obj, chain="") {
-    // check prevents error from trying to overwrite function's "call" property. special handling for AceEditorAdapter.session.$worker
-    if (!obj.hasOwnProperty("call"))
-        obj = Object.assign(() => permissive({}), obj);
-
-    return new Proxy(obj, {
+    const callableTarget = () => {};
+    return new Proxy(callableTarget, {
         get(target, prop, receiver) {
-            if (prop in target)
-                return Reflect.get(...arguments);
+            if (prop in obj)
+                return Reflect.get(obj, prop, receiver);
             const newChain = chain + "." + String(prop);
             log.warn("Unknown property access:", newChain);
             return permissive({}, newChain);
         },
+        set(target, prop, value) {
+            return Reflect.set(obj, prop, value);
+        },
+        has(target, prop) {
+            return prop in obj;
+        },
+        ownKeys(target) {
+            return Reflect.ownKeys(obj);
+        },
+        getOwnPropertyDescriptor(target, prop) {
+            return Reflect.getOwnPropertyDescriptor(obj, prop);
+        },
         apply(target, thisArg, args) {
+            if (typeof obj === "function")
+                return Reflect.apply(obj, thisArg, args);
             const newChain = chain + "()";
             log.warn("Unknown function call:", newChain);
             return permissive({}, newChain);
@@ -63,7 +75,9 @@ export function AceAdapter(monacoController) {
                 element.textContent = "";
             }
 
-            return new AceEditorAdapter(element, options, monacoController, sourceCode);
+            const editorAdapter = new AceEditorAdapter(element, options, monacoController, sourceCode);
+            exposeToConsole("editorAdapter", editorAdapter);
+            return editorAdapter;
         },
         UndoManager: nop,
     };
@@ -119,7 +133,7 @@ function AceEditorAdapter(targetElement, options, monacoController, sourceCode="
             setTabSize: (v) => eddy.updateOptions({ tabSize: v }),
             setUseSoftTabs: (v) => eddy.updateOptions({ insertSpaces: v }),
             $worker: {
-                call(fnkey, args) {
+                call: nop,/*(fnkey, args) => {
                     if (fnkey !== "setOptions")
                         log.warn(`AceEditorAdapter.session.$worker.call called with unsupported fnkey: ${fnkey}`);
                     else if (args.length !== 1)
@@ -131,14 +145,13 @@ function AceEditorAdapter(targetElement, options, monacoController, sourceCode="
                     else {
                         // args = [{ loopfunc:true, esversion:6 }]
                         // ignore loopfunc, no equivalent (jshint setting)
-                        return
                         const esversion = args[0].esversion;
                         const target = esversion > 5 ? "ES" + (2009 + esversion).toString() : "ES" + esversion.toString();
                         const targetEnum = monica.languages.typescript.ScriptTarget;
                         if (target in targetEnum)
                             monacoController.updateCompilerOptions({ target: targetEnum[target]});
                     }
-                },
+                },*/
             },
             setUndoManager: nop,
             getUndoManager: () => ({
@@ -153,7 +166,7 @@ function AceEditorAdapter(targetElement, options, monacoController, sourceCode="
         renderer: {
             get scrollTop() { return eddy.getScrollTop(); },
             set scrollTop(v) { return eddy.setScrollTop(v); },
-            scrollBy: (dy) => eddy.setScrollTop(eddy.getScrollTop + dy),
+            scrollBy: (dy) => eddy.setScrollTop(eddy.getScrollTop() + dy),
             animateScrolling: nop,
             updateFull: nop,
         },
@@ -216,8 +229,7 @@ function AceEditorAdapter(targetElement, options, monacoController, sourceCode="
         commands: {
             addCommand: function({name, bindKey, exec}) {
                 const id = name.toLowerCase().replaceAll(" ", "-");
-                const key = {
-                    "F2": monica.KeyCode.F2,
+                const key = monica.KeyCode[bindKey.win] ?? {
                     "Esc": monica.KeyCode.Escape,
                 }[bindKey.win];
                 if (key === undefined) {
@@ -228,7 +240,8 @@ function AceEditorAdapter(targetElement, options, monacoController, sourceCode="
                     id,
                     label: name,
                     keybindings: [monica.KeyMod.None | key],
-                    run: () => exec(adapter),
+                    contextMenuGroupId: "pb3m",
+                    run: () => exec(proxied),
                 });
             },
         },
@@ -236,6 +249,8 @@ function AceEditorAdapter(targetElement, options, monacoController, sourceCode="
         get $isFocused() {
             return eddy.hasTextFocus();
         },
+        myFullScreenMode: false,
     };
-    return deepPermissive(adapter);
+    const proxied = deepPermissive(adapter);
+    return proxied;
 }

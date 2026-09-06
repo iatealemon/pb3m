@@ -6,8 +6,10 @@ The PB3 script environment types are fetched from a separate repository at https
 
 Bundled using Rollup, so the bundled userscript code remains readable and you can modify it if you wish.
 
+You can find the changelog [here](https://github.com/iatealemon/typed-pb3/blob/main/CHANGELOG.md).
+
 ## How to install
-PB3M can be used with Tampermonkey. You can download Tampermonkey from [here](https://www.tampermonkey.net/), then once you have installed Tampermonkey, you can download PB3M by clicking [here](https://github.com/iatealemon/pb3m/raw/main/dist/pb3m.user.js)
+PB3M can be used with Tampermonkey. You can download Tampermonkey from [here](https://www.tampermonkey.net/), then once you have installed Tampermonkey, you can download PB3M by clicking [here](https://github.com/iatealemon/pb3m/raw/main/dist/pb3m.user.js).
 
 ## To-do
 - Types and documentation for the PB3 script environment. Most types are currently shown as "any" because they're to-do. Replacing them with their real types requires testing and code reading. You may contribute by sending a message on Discord or making a pull request on the typed-pb3 repository.
